@@ -1,0 +1,53 @@
+from netCDF4 import Dataset as nc
+from wrf import (to_np, getvar, smooth2d, get_cartopy, cartopy_xlim,
+                 cartopy_ylim, latlon_coords, ALL_TIMES, ll_to_xy)
+from glob import glob
+import numpy as np
+import xarray as xr
+import rioxarray
+import geopandas
+from shapely.geometry import mapping
+import rasterio
+from rasterio.windows import Window
+from rasterio.transform import from_origin
+import gdal
+from osgeo import gdal
+from osgeo import osr
+
+# Open the NetCDF file
+wrfdir= sorted(glob("/media/gil/guheat/Guheat/BEM/wrfout_d03_*"))
+ncfile = [nc(x) for x in wrfdir]
+
+for i in range(len(ncfile)):
+	rh2 = getvar(ncfile, "rh2", timeidx=i)
+	T2 = getvar(ncfile, "T2",timeidx=i)
+	t2 = (T2-273.15)*(9/5)+32  #fahrenheit
+
+	#create the heat index equation
+	HI = -(42.379)+(2.04901523*t2)+(10.14333127*rh2)-(0.22475541*t2*rh2)-((6.83783*(10**-3))*(t2**2))-	((5.481717*(10**-2))*(rh2**2))+((1.22874*(10**-3))*(t2**2)*(rh2))+((8.5282*(10**-4))*(t2)*(rh2**2))-	((1.99*(10**-6))*(t2**2)*(rh2**2))
+
+	#convert HI to celsius
+	HIC = (HI-32)*(5/9)
+
+	#set the coordinates
+	lats, lons = latlon_coords(HIC)
+	HIC = np.array(HIC)
+	HIC = np.flip(HIC,0)
+	xmin,ymin,xmax,ymax = [lons.min(),lats.min(),lons.max(),lats.max()]
+
+	#determine the geotransform
+	nx = len(lons)
+	ny = len(lats)
+	xres = (xmax-xmin)/float(nx)
+	yres = (ymax-ymin)/float(ny)
+	geotransform=(xmin,xres,0,ymax,0,-yres)
+
+	#creating tiff file
+	dst_ds = gdal.GetDriverByName('GTiff').Create('ncfile'+str(i)+'.tif',ny,nx,1,gdal.GDT_Float32)
+	dst_ds.SetGeoTransform(geotransform)      #specify coordinates
+	srs = osr.SpatialReference()		  #establish econding
+	srs.ImportFromEPSG(4326)		  # WGS84 lat/lon
+	dst_ds.SetProjection(srs.ExportToWkt())   # export coords to file
+	dst_ds.GetRasterBand(1).WriteArray(HIC)   # write r-band to the raster
+	dst_ds = None
+
