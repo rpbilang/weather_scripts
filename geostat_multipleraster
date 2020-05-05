@@ -1,0 +1,13 @@
+import glob, os, qgis.analysis
+import re
+
+#define the sorting script
+numbers = re.compile(r'(\d+)')
+def numericalSort(Value):
+	parts = numbers.split(Value)
+	parts[1::2] = map(int,parts[1::2])
+	return parts
+
+vectorlayer = qgis.utils.iface.mapCanvas().currentLayer()
+rasterfolder = 'C:\\Users\\User\\Desktop\\try'
+os.chdir(rasterfolder)
