@@ -1,0 +1,69 @@
+#!/usr/bin/env python
+from netCDF4 import Dataset as nc
+import numpy as np
+import matplotlib.pyplot as plt
+from matplotlib.cm import get_cmap
+from matplotlib.colors import ListedColormap, LinearSegmentedColormap
+import cartopy.crs as crs
+from cartopy.io.shapereader import Reader
+from cartopy.feature import NaturalEarthFeature
+from cartopy.feature import ShapelyFeature
+from glob import glob
+from wrf import (getvar, interplevel, to_np, latlon_coords, get_cartopy,
+                 cartopy_xlim, cartopy_ylim,omp_set_num_threads, omp_get_max_threads,omp_get_num_procs,omp_enabled,
+import gdal
+from osgeo import gdal
+from osgeo import osr
+
+#Listing the directory and sorting of files
+wrfdir= sorted(glob("/media/gil/guheat/outputs/D_122/wrfout_d03_2018-12-14*"))
+ncfiles = [nc(x) for x in wrfdir]
+
+# Extract the pressure, geopotential height, and wind variables
+ht = getvar(ncfiles, "height_agl", timeidx=ALL_TIMES,units="m")[:,0:10,:]
+ht1 = getvar(ncfiles, "height_agl", timeidx=ALL_TIMES,units="m")[:,0:10,::4,::4]
+wspd = getvar(ncfiles, "uvmet_wspd_wdir",timeidx=ALL_TIMES,method="cat", units="m s-1",meta=True)[0,:,0:10]
+ua = getvar(ncfiles, "uvmet",timeidx=ALL_TIMES,method="cat",units="m s-1")[0,:,0:10,::4,::4]
+va = getvar(ncfiles, "uvmet",timeidx=ALL_TIMES,method="cat", units="m s-1")[1,:,0:10,::4,::4]
+
+print(ua.shape, va.shape,ht1.shape)
+# Interpolate geopotential height, u, and v winds to 60 hPa
+levels = np.asarray([100])
+wspd_60 = interplevel(wspd, ht, levels)
+u_60 = interplevel(ua, ht1, levels)
+v_60 = interplevel(va, ht1, levels)
+
+
+#get the mean 
+uam = u_60.groupby('Time.month').mean('Time')
+vam = v_60.groupby('Time.month').mean('Time')
+wspdm = wspd_60.groupby('Time.month').mean('Time')
+wspdmf = wspdm.squeeze('month')
+uamf = uam.squeeze('month')
+vamf = vam.squeeze('month')
+
+#get the latlon coordinates
+lats,lons = latlon_coords(wspdmf) 
+
+#set the coordinates
+wspdmf = np.array(wspdmf)
+wspdmf1 = np.flip(wspdmf,0)
+xmin,ymin,xmax,ymax = [lons.min(),lats.min(),lons.max(),lats.max()]
+
+#determine the geotransform
+nx = len(lons)
+ny = len(lats)
+xres = (xmax-xmin)/float(nx)
+yres = (ymax-ymin)/float(ny)
+geotransform=(xmin,xres,0,ymax,0,-yres)
+
+#creating tiff file
+dst_ds = gdal.GetDriverByName('GTiff').Create('wind_trial.tif',ny,nx,1,gdal.GDT_Float32)
+dst_ds.SetGeoTransform(geotransform)      #specify coordinates
+srs = osr.SpatialReference()		  #establish econding
+srs.ImportFromEPSG(4326)		  # WGS84 lat/lon
+dst_ds.SetProjection(srs.ExportToWkt())   # export coords to file
+dst_ds.GetRasterBand(1).WriteArray(wspdmf1)  
+dst_ds = None
+
+
